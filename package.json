@@ -1,0 +1,26 @@
+{
+  "name": "payment-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot rieng cho cong thanh toan nap/rut/thong ke/chot doanh thu",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js",
+    "dev": "node --watch src/bot.js",
+    "test": "node test/formatters.test.js",
+    "check": "node -c src/bot.js && node -c src/config/env.js && node -c src/db/mongo.js && node -c src/handlers/botHandler.js && node -c src/handlers/rechargeHandler.js && node -c src/handlers/withdrawHandler.js && node -c src/handlers/statsHandler.js && node -c src/handlers/settlementHandler.js && node -c src/handlers/usageHandler.js && node -c src/services/rechargeApiClient.js && node -c src/services/withdrawApiClient.js && node -c src/services/rechargeStore.js && node -c src/services/withdrawStore.js && node -c src/services/callbackServer.js && node -c src/services/withdrawWeb.js && node -c src/utils/botUtils.js && node -c src/utils/formatters.js && node -c src/utils/bankEnum.js"
+  },
+  "keywords": [
+    "telegram",
+    "payment",
+    "bot"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.8.4",
+    "dotenv": "^16.4.5",
+    "jszip": "^3.10.1",
+    "mongodb": "^6.14.2",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
