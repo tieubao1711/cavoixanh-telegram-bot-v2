@@ -40,6 +40,12 @@ function registerBot(bot) {
 
   bot.on('callback_query', async (query) => {
     try {
+      console.log('[callback_query_received]', {
+        id: query.id,
+        fromId: query.from?.id,
+        chatId: query.message?.chat?.id,
+        data: query.data
+      });
       await handleRechargeCallbackQuery(bot, query);
     } catch (error) {
       console.error('[callback_query_error]', error?.message || error);

@@ -117,9 +117,26 @@ async function handleRechargeCallbackQuery(bot, query) {
     return true;
   }
 
+  await bot.answerCallbackQuery(query.id, { text: 'Da nhan lua chon bank, dang xu ly...' });
+  console.log('[recharge_bank_selected]', {
+    requestId: parsed.requestId,
+    bankIndex: parsed.bankIndex,
+    bankCode: parsed.bankCode,
+    chatId,
+    userId
+  });
+
   const order = await getRechargeOrder(parsed.requestId);
   if (!order || order.chatId !== chatId || order.userId !== userId) {
-    await bot.answerCallbackQuery(query.id, { text: 'Lenh nap khong hop le hoac da het han.' });
+    console.warn('[recharge_order_not_found_or_mismatch]', {
+      requestId: parsed.requestId,
+      hasOrder: Boolean(order),
+      orderChatId: order?.chatId,
+      orderUserId: order?.userId,
+      chatId,
+      userId
+    });
+    await bot.sendMessage(chatId, 'Lenh nap khong hop le hoac da het han. Vui long tao lenh /naptien moi.');
     return true;
   }
 
@@ -128,19 +145,40 @@ async function handleRechargeCallbackQuery(bot, query) {
     ? bankOptions[parsed.bankIndex]
     : bankOptions.find((item) => item.code === parsed.bankCode);
   if (!bank) {
-    await bot.answerCallbackQuery(query.id, { text: 'Bank khong hop le.' });
+    console.warn('[recharge_bank_not_found]', {
+      requestId: parsed.requestId,
+      bankIndex: parsed.bankIndex,
+      bankCode: parsed.bankCode,
+      totalBanks: bankOptions.length
+    });
+    await bot.sendMessage(chatId, 'Bank khong hop le. Vui long tao lenh /naptien moi.');
     return true;
   }
 
-  await bot.answerCallbackQuery(query.id, { text: 'Dang tao thong tin chuyen khoan...' });
+  await bot.sendMessage(chatId, `Dang tao thong tin chuyen khoan cho bank <b>${escapeHtml(bank.name || bank.code || '-')}</b>...`, {
+    parse_mode: 'HTML'
+  });
 
   try {
+    console.log('[recharge_create_request]', {
+      requestId: order.requestId,
+      amount: order.amount,
+      bankCode: bank.code,
+      callbackUrl: getCallbackUrl()
+    });
     const response = await createBankRecharge({
       amount: order.amount,
       memberIdentity: order.memberIdentity,
       requestId: order.requestId,
       bankCode: bank.code,
       callbackUrl: getCallbackUrl()
+    });
+
+    console.log('[recharge_create_response]', {
+      requestId: order.requestId,
+      stt: response?.stt,
+      msg: response?.msg,
+      hasData: Boolean(response?.data)
     });
 
     if (response?.stt !== 1) {
