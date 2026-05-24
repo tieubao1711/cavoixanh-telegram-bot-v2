@@ -46,6 +46,14 @@ function registerBot(bot) {
         chatId: query.message?.chat?.id,
         data: query.data
       });
+      if (query.data === 'debug:callback') {
+        await bot.answerCallbackQuery(query.id, {
+          text: 'Callback OK',
+          show_alert: true
+        });
+        await bot.sendMessage(query.message.chat.id, 'Callback test OK.');
+        return;
+      }
       await handleRechargeCallbackQuery(bot, query);
     } catch (error) {
       console.error('[callback_query_error]', error?.message || error);

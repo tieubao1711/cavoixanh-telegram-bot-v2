@@ -16,7 +16,14 @@ function buildUsageMessage() {
 }
 
 async function sendUsage(bot, chatId) {
-  await bot.sendMessage(chatId, buildUsageMessage(), { parse_mode: 'HTML' });
+  await bot.sendMessage(chatId, buildUsageMessage(), {
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: 'Test callback', callback_data: 'debug:callback' }]
+      ]
+    }
+  });
 }
 
 module.exports = {

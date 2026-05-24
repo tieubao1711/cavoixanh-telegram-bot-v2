@@ -18,13 +18,23 @@ function normalizeBanks(apiResponse) {
 }
 
 function buildBankKeyboard(requestId, banks) {
+  const keyboard = banks.map((bank, index) => [
+    {
+      text: bank.name || bank.code,
+      callback_data: `${RECHARGE_BANK_PREFIX}${requestId}:${index}`
+    }
+  ]);
+
+  console.log('[recharge_bank_keyboard]', {
+    requestId,
+    totalBanks: banks.length,
+    firstButtonData: keyboard[0]?.[0]?.callback_data,
+    firstButtonDataLength: keyboard[0]?.[0]?.callback_data?.length || 0,
+    maxButtonDataLength: keyboard.reduce((max, row) => Math.max(max, row[0].callback_data.length), 0)
+  });
+
   return {
-    inline_keyboard: banks.map((bank, index) => [
-      {
-        text: bank.name || bank.code,
-        callback_data: `${RECHARGE_BANK_PREFIX}${requestId}:${index}`
-      }
-    ])
+    inline_keyboard: keyboard
   };
 }
 
