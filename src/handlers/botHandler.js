@@ -39,7 +39,20 @@ function registerBot(bot) {
   });
 
   bot.on('callback_query', async (query) => {
-    await handleRechargeCallbackQuery(bot, query);
+    try {
+      await handleRechargeCallbackQuery(bot, query);
+    } catch (error) {
+      console.error('[callback_query_error]', error?.message || error);
+      if (query.id) {
+        await bot.answerCallbackQuery(query.id, {
+          text: 'Co loi khi xu ly lua chon. Vui long thu lai.',
+          show_alert: true
+        }).catch(() => {});
+      }
+      if (query.message?.chat?.id) {
+        await bot.sendMessage(query.message.chat.id, 'Co loi khi xu ly lua chon bank. Vui long thu lai hoac tao lenh nap moi.');
+      }
+    }
   });
 }
 

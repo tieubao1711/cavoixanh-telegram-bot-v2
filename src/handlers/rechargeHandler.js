@@ -6,7 +6,8 @@ const { getCallbackUrl } = require('../services/callbackServer');
 const { escapeHtml, formatNumber } = require('../utils/formatters');
 const { isAllowedUser, extractAxiosError } = require('../utils/botUtils');
 
-const RECHARGE_BANK_PREFIX = 'recharge_bank:';
+const RECHARGE_BANK_PREFIX = 'rb:';
+const LEGACY_RECHARGE_BANK_PREFIX = 'recharge_bank:';
 
 function createRequestId() {
   return `dep_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -18,10 +19,10 @@ function normalizeBanks(apiResponse) {
 
 function buildBankKeyboard(requestId, banks) {
   return {
-    inline_keyboard: banks.map((bank) => [
+    inline_keyboard: banks.map((bank, index) => [
       {
         text: bank.name || bank.code,
-        callback_data: `${RECHARGE_BANK_PREFIX}${requestId}:${bank.code}`
+        callback_data: `${RECHARGE_BANK_PREFIX}${requestId}:${index}`
       }
     ])
   };
@@ -101,19 +102,31 @@ async function handleNapTienCommand(bot, msg, match) {
 }
 
 async function handleRechargeCallbackQuery(bot, query) {
-  if (!query.data?.startsWith(RECHARGE_BANK_PREFIX)) return false;
+  if (
+    !query.data?.startsWith(RECHARGE_BANK_PREFIX) &&
+    !query.data?.startsWith(LEGACY_RECHARGE_BANK_PREFIX)
+  ) {
+    return false;
+  }
 
   const chatId = query.message.chat.id;
   const userId = query.from.id;
-  const [, requestId, bankCode] = query.data.split(':');
+  const parsed = parseRechargeBankCallbackData(query.data);
+  if (!parsed) {
+    await bot.answerCallbackQuery(query.id, { text: 'Du lieu chon bank khong hop le.' });
+    return true;
+  }
 
-  const order = await getRechargeOrder(requestId);
+  const order = await getRechargeOrder(parsed.requestId);
   if (!order || order.chatId !== chatId || order.userId !== userId) {
     await bot.answerCallbackQuery(query.id, { text: 'Lenh nap khong hop le hoac da het han.' });
     return true;
   }
 
-  const bank = (order.bankOptions || []).find((item) => item.code === bankCode);
+  const bankOptions = order.bankOptions || [];
+  const bank = parsed.bankIndex !== null
+    ? bankOptions[parsed.bankIndex]
+    : bankOptions.find((item) => item.code === parsed.bankCode);
   if (!bank) {
     await bot.answerCallbackQuery(query.id, { text: 'Bank khong hop le.' });
     return true;
@@ -156,8 +169,29 @@ async function handleRechargeCallbackQuery(bot, query) {
   return true;
 }
 
+function parseRechargeBankCallbackData(data) {
+  if (data.startsWith(RECHARGE_BANK_PREFIX)) {
+    const parts = data.slice(RECHARGE_BANK_PREFIX.length).split(':');
+    const requestId = parts[0];
+    const bankIndex = Number(parts[1]);
+    if (!requestId || !Number.isInteger(bankIndex) || bankIndex < 0) return null;
+    return { requestId, bankIndex, bankCode: null };
+  }
+
+  if (data.startsWith(LEGACY_RECHARGE_BANK_PREFIX)) {
+    const parts = data.slice(LEGACY_RECHARGE_BANK_PREFIX.length).split(':');
+    const requestId = parts[0];
+    const bankCode = parts.slice(1).join(':');
+    if (!requestId || !bankCode) return null;
+    return { requestId, bankIndex: null, bankCode };
+  }
+
+  return null;
+}
+
 module.exports = {
   handleNapTienCommand,
   handleRechargeCallbackQuery,
-  buildRechargeInfoMessage
+  buildRechargeInfoMessage,
+  parseRechargeBankCallbackData
 };
