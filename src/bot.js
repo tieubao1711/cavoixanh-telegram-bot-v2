@@ -8,12 +8,22 @@ if (!env.telegramBotToken) {
   throw new Error('Missing TELEGRAM_BOT_TOKEN in environment variables');
 }
 
-const bot = new TelegramBot(env.telegramBotToken, { polling: true });
+const bot = new TelegramBot(env.telegramBotToken, { polling: false });
 let callbackServer;
 
 connectMongo()
-  .then(() => {
+  .then(async () => {
+    await bot.deleteWebHook({ drop_pending_updates: false });
     registerBot(bot);
+    await bot.startPolling({
+      restart: true,
+      params: {
+        allowed_updates: [
+          'message',
+          'callback_query'
+        ]
+      }
+    });
     callbackServer = startRechargeCallbackServer(bot);
     console.log('Payment Telegram bot started');
   })
@@ -23,7 +33,12 @@ connectMongo()
   });
 
 bot.on('polling_error', (error) => {
-  console.error('[polling_error]', error?.message || error);
+  console.error('[polling_error]', {
+    message: error?.message,
+    code: error?.code,
+    responseBody: error?.response?.body,
+    stack: error?.stack
+  });
 });
 
 async function shutdown() {
