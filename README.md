@@ -56,9 +56,9 @@ Bot se ket noi MongoDB, dang ky polling Telegram va mo callback/web server tren 
 
 ```bash
 npm install -g pm2
-pm2 start src/bot.js --name payment-telegram-bot
+pm2 start ecosystem.config.js
 pm2 save
-pm2 logs payment-telegram-bot
+pm2 logs cavoixanh-telegram-bot-v2
 ```
 
 Neu dung reverse proxy hoac tunnel cho callback, tro public URL toi:
