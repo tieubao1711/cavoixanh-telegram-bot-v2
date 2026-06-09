@@ -3,8 +3,7 @@ const { getActiveRevenueDashboardSession } = require('./dashboardStore');
 const {
   getRechargeStats,
   getUnsettledRevenueSummary,
-  getSuccessfulRechargeOrdersByRange,
-  getRecentRevenueSettlements
+  getSuccessfulRechargeOrdersByRange
 } = require('./rechargeStore');
 const { createXlsxBuffer } = require('../utils/xlsxWriter');
 const { escapeHtml, formatNumber, formatDateTime } = require('../utils/formatters');
@@ -56,11 +55,10 @@ async function handleRevenueWebRequest(req, res, url) {
 
   try {
     const range = getRevenueRange(url.searchParams);
-    const [stats, orders, unsettled, recentSettlements] = await Promise.all([
+    const [stats, orders, unsettled] = await Promise.all([
       getRechargeStats(range.start, range.end),
       getSuccessfulRechargeOrdersByRange(range.start, range.end, 500),
-      getUnsettledRevenueSummary(),
-      getRecentRevenueSettlements(10)
+      getUnsettledRevenueSummary()
     ]);
 
     if (url.pathname === '/revenue/export') {
@@ -75,8 +73,7 @@ async function handleRevenueWebRequest(req, res, url) {
       range,
       stats,
       orders,
-      unsettled,
-      recentSettlements
+      unsettled
     }));
     return true;
   } catch (error) {
@@ -91,8 +88,28 @@ function getRevenueRange(params) {
   const today = getVietnamDateString(new Date());
   const date = normalizeDate(params.get('date')) || today;
   const month = normalizeMonth(params.get('month')) || date.slice(0, 7);
+  const days = normalizeDays(params.get('days'));
   const startParam = normalizeDate(params.get('start'));
   const endParam = normalizeDate(params.get('end'));
+
+  if (period === 'last') {
+    const endDate = date;
+    const end = new Date(parseVietnamDate(endDate).getTime() + 24 * 60 * 60 * 1000);
+    const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+    const startDate = getVietnamDateString(start);
+    return {
+      period,
+      label: days === 1 ? `Hom nay ${formatDisplayDate(endDate)}` : `${days} ngay gan nhat`,
+      start,
+      end,
+      date,
+      month,
+      days,
+      startDate,
+      endDate,
+      fileSuffix: `${days}-ngay-gan-nhat-${endDate}`
+    };
+  }
 
   if (period === 'week') {
     const parts = getVietnamDateParts(parseVietnamDate(date));
@@ -106,6 +123,7 @@ function getRevenueRange(params) {
       end,
       date,
       month,
+      days,
       startDate: getVietnamDateString(start),
       endDate: getVietnamDateString(new Date(end.getTime() - 1)),
       fileSuffix: `tuan-${date}`
@@ -123,6 +141,7 @@ function getRevenueRange(params) {
       end,
       date,
       month,
+      days,
       startDate: getVietnamDateString(start),
       endDate: getVietnamDateString(new Date(end.getTime() - 1)),
       fileSuffix: `thang-${month}`
@@ -141,6 +160,7 @@ function getRevenueRange(params) {
       end,
       date,
       month,
+      days,
       startDate,
       endDate,
       fileSuffix: `${startDate}_${endDate}`
@@ -156,13 +176,14 @@ function getRevenueRange(params) {
     end,
     date,
     month,
+    days,
     startDate: date,
     endDate: date,
     fileSuffix: `ngay-${date}`
   };
 }
 
-function renderRevenueDashboard({ token, session, range, stats, orders, unsettled, recentSettlements }) {
+function renderRevenueDashboard({ token, session, range, stats, orders, unsettled }) {
   const exportUrl = `/revenue/export?${buildRangeQuery(token, range)}`;
   return `<!doctype html>
 <html lang="vi">
@@ -173,40 +194,45 @@ function renderRevenueDashboard({ token, session, range, stats, orders, unsettle
   <title>Doanh thu</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f4f6f8; color: #172033; font-family: Arial, sans-serif; }
-    main { width: min(1220px, calc(100% - 28px)); margin: 22px auto 42px; }
-    header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-end; margin-bottom: 16px; }
-    h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: 0; }
-    h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }
-    p { margin: 0; color: #627083; line-height: 1.45; }
+    body { margin: 0; background: #f3f5f7; color: #172033; font-family: Arial, sans-serif; }
+    main { width: min(1240px, calc(100% - 28px)); margin: 20px auto 42px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 14px; }
+    h1 { margin: 0 0 5px; font-size: 26px; letter-spacing: 0; }
+    h2 { margin: 0 0 12px; font-size: 17px; letter-spacing: 0; }
+    p { margin: 0; color: #617085; line-height: 1.45; font-size: 14px; }
     a { color: inherit; text-decoration: none; }
-    .badge { border: 1px solid #d9e2ec; background: #fff; border-radius: 999px; padding: 8px 11px; font-size: 13px; font-weight: 700; color: #526173; white-space: nowrap; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .badge { border: 1px solid #d6dee8; background: #fff; border-radius: 999px; padding: 8px 11px; font-size: 13px; font-weight: 700; color: #526173; white-space: nowrap; }
     .toolbar, .card, section { background: #fff; border: 1px solid #d9e2ec; border-radius: 8px; box-shadow: 0 10px 24px rgba(23,32,51,.06); }
-    .toolbar { padding: 14px; margin-bottom: 14px; }
-    form { display: grid; grid-template-columns: 150px repeat(4, minmax(130px, 1fr)) auto auto; gap: 10px; align-items: end; }
+    .toolbar { padding: 12px; margin-bottom: 12px; }
+    .quick { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .quick a { border: 1px solid #c7d3df; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-weight: 800; color: #26364d; background: #fff; }
+    .quick a.active { background: #075fb8; border-color: #075fb8; color: #fff; }
+    form { display: grid; grid-template-columns: 150px repeat(4, minmax(130px, 1fr)) auto; gap: 10px; align-items: end; }
     label { display: grid; gap: 5px; color: #526173; font-size: 12px; font-weight: 800; }
     input, select, button, .button { min-height: 40px; border-radius: 7px; border: 1px solid #bac7d5; background: #fff; color: #172033; padding: 9px 10px; font-size: 14px; }
     button, .button { border: 0; background: #075fb8; color: #fff; font-weight: 800; cursor: pointer; text-align: center; }
     .button.secondary { background: #172033; }
-    .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
-    .card { padding: 16px; min-height: 104px; }
+    .cards { display: grid; grid-template-columns: 1.35fr repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+    .card { padding: 15px; min-height: 98px; }
     .label { color: #647184; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
-    .value { font-size: 25px; font-weight: 800; line-height: 1.15; }
+    .value { font-size: 24px; font-weight: 800; line-height: 1.15; }
+    .cards .card:first-child .value { font-size: 30px; }
     .meta { margin-top: 6px; color: #647184; font-size: 13px; }
-    .grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(330px, .85fr); gap: 14px; }
-    section { padding: 16px; overflow: hidden; margin-bottom: 14px; }
-    .chart { display: grid; grid-template-columns: repeat(var(--bars), minmax(28px, 1fr)); gap: 8px; height: 240px; align-items: end; padding: 12px 4px 4px; border-bottom: 1px solid #e4ebf2; }
-    .bar-wrap { display: grid; align-items: end; height: 100%; min-width: 0; }
-    .bar { min-height: 3px; background: #075fb8; border-radius: 5px 5px 0 0; position: relative; }
-    .bar strong { position: absolute; left: 50%; bottom: calc(100% + 5px); transform: translateX(-50%); font-size: 11px; white-space: nowrap; color: #526173; }
-    .bar-labels { display: grid; grid-template-columns: repeat(var(--bars), minmax(28px, 1fr)); gap: 8px; padding-top: 7px; color: #647184; font-size: 11px; text-align: center; }
+    section { padding: 15px; overflow: hidden; margin-bottom: 12px; }
+    .chart-box { width: 100%; overflow-x: auto; }
+    svg { display: block; min-width: 760px; width: 100%; height: 280px; }
+    .axis { stroke: #d9e2ec; stroke-width: 1; }
+    .bar { fill: #075fb8; }
+    .line { fill: none; stroke: #172033; stroke-width: 2.5; }
+    .tick, .bar-text { fill: #647184; font-size: 11px; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { padding: 10px 8px; border-bottom: 1px solid #edf1f5; text-align: left; vertical-align: top; }
     th { color: #526173; font-size: 12px; text-transform: uppercase; letter-spacing: 0; background: #fbfcfe; }
     td.amount { font-weight: 800; white-space: nowrap; }
     code { background: #f1f4f8; border-radius: 5px; padding: 2px 5px; }
     .empty { color: #647184; padding: 14px 0; }
-    @media (max-width: 980px) { header { display: block; } .badge { display: inline-block; margin-top: 12px; } form, .cards, .grid { grid-template-columns: 1fr; } table { font-size: 13px; } th:nth-child(4), td:nth-child(4) { display: none; } }
+    @media (max-width: 980px) { header { display: block; } .actions { justify-content: flex-start; margin-top: 12px; } form, .cards { grid-template-columns: 1fr; } table { font-size: 13px; } th:nth-child(4), td:nth-child(4) { display: none; } }
   </style>
 </head>
 <body>
@@ -214,9 +240,12 @@ function renderRevenueDashboard({ token, session, range, stats, orders, unsettle
     <header>
       <div>
         <h1>Doanh thu</h1>
-        <p>${escapeHtml(range.label)}. Tu dong cap nhat moi 90 giay. Link het han luc ${escapeHtml(formatDateTime(session.expiresAt))}.</p>
+        <p>${escapeHtml(range.label)}. Tu dong cap nhat moi 90 giay.</p>
       </div>
-      <div class="badge">User ${escapeHtml(session.telegramUsername || session.userId)}</div>
+      <div class="actions">
+        <a class="button secondary" href="${escapeHtml(exportUrl)}">Xuat Excel</a>
+        <div class="badge">Het han ${escapeHtml(formatDateTime(session.expiresAt))}</div>
+      </div>
     </header>
 
     <div class="toolbar">
@@ -227,47 +256,68 @@ function renderRevenueDashboard({ token, session, range, stats, orders, unsettle
       ${renderMetricCard('Doanh thu filter', stats.totalAmount, `${formatNumber(stats.totalOrders)} lenh thanh cong`)}
       ${renderMetricCard('Gia tri trung binh', stats.totalOrders ? Math.round(stats.totalAmount / stats.totalOrders) : 0, 'Trung binh moi lenh')}
       ${renderMetricCard('Chua chot', unsettled.totalAmount, `${formatNumber(unsettled.totalOrders)} lenh dang doi soat`)}
-      ${renderMetricCard('Khoang thoi gian', stats.totalOrders, `${escapeHtml(range.startDate)} den ${escapeHtml(range.endDate)}`)}
+      ${renderMetricCard('So lenh', stats.totalOrders, `${escapeHtml(range.startDate)} den ${escapeHtml(range.endDate)}`)}
     </div>
 
     <section>
-      <h2>Bieu do doanh thu</h2>
-      ${renderBarChart(stats.byDay)}
+      <h2>Xu huong doanh thu</h2>
+      ${renderRevenueChart(stats.byDay)}
     </section>
 
-    <div class="grid">
-      <section>
-        <h2>Lenh nap thanh cong trong filter</h2>
-        ${renderOrdersTable(orders)}
-      </section>
-      <section>
-        <h2>Lich su chot gan nhat</h2>
-        ${renderSettlementsTable(recentSettlements)}
-      </section>
-    </div>
+    <section>
+      <h2>Lenh nap thanh cong</h2>
+      ${renderOrdersTable(orders)}
+    </section>
   </main>
 </body>
 </html>`;
 }
 
 function renderFilterForm(token, range, exportUrl) {
-  return `<form method="get" action="/revenue">
+  return `${renderQuickFilters(token, range)}
+  <form method="get" action="/revenue">
     <input type="hidden" name="token" value="${escapeHtml(token)}">
     <label>Che do
       <select name="period">
+        ${renderOption('last', 'Gan nhat', range.period)}
         ${renderOption('day', 'Theo ngay', range.period)}
         ${renderOption('week', 'Theo tuan', range.period)}
         ${renderOption('month', 'Theo thang', range.period)}
         ${renderOption('custom', 'Khoang ngay', range.period)}
       </select>
     </label>
+    <label>So ngay<input type="number" name="days" min="1" max="90" value="${escapeHtml(range.days)}"></label>
     <label>Ngay<input type="date" name="date" value="${escapeHtml(range.date)}"></label>
     <label>Thang<input type="month" name="month" value="${escapeHtml(range.month)}"></label>
     <label>Tu ngay<input type="date" name="start" value="${escapeHtml(range.startDate)}"></label>
     <label>Den ngay<input type="date" name="end" value="${escapeHtml(range.endDate)}"></label>
     <button type="submit">Loc</button>
-    <a class="button secondary" href="${escapeHtml(exportUrl)}">Xuat Excel</a>
   </form>`;
+}
+
+function renderQuickFilters(token, range) {
+  const items = [
+    ['last', '1', 'Hom nay'],
+    ['last', '2', '2 ngay'],
+    ['last', '7', '7 ngay'],
+    ['last', '30', '30 ngay'],
+    ['week', String(range.days), 'Tuan nay'],
+    ['month', String(range.days), 'Thang nay']
+  ];
+  const links = items.map(([period, days, label]) => {
+    const active = range.period === period && (period !== 'last' || String(range.days) === days);
+    const query = new URLSearchParams({
+      token,
+      period,
+      days,
+      date: range.date,
+      month: range.month,
+      start: range.startDate,
+      end: range.endDate
+    });
+    return `<a class="${active ? 'active' : ''}" href="/revenue?${query.toString()}">${escapeHtml(label)}</a>`;
+  }).join('');
+  return `<div class="quick">${links}</div>`;
 }
 
 function renderOption(value, label, current) {
@@ -282,16 +332,39 @@ function renderMetricCard(label, value, meta) {
   </div>`;
 }
 
-function renderBarChart(items) {
+function renderRevenueChart(items) {
   if (!items.length) return '<div class="empty">Chua co du lieu de ve bieu do.</div>';
+  const width = 960;
+  const height = 280;
+  const pad = { left: 54, right: 18, top: 24, bottom: 42 };
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
   const max = Math.max(...items.map((item) => Number(item.totalAmount || 0)), 1);
-  const bars = items.map((item) => {
+  const barGap = 10;
+  const barWidth = Math.max(8, (plotWidth - barGap * (items.length - 1)) / items.length);
+  const bars = items.map((item, index) => {
     const amount = Number(item.totalAmount || 0);
-    const height = Math.max(Math.round((amount / max) * 100), amount > 0 ? 3 : 0);
-    return `<div class="bar-wrap"><div class="bar" style="height:${height}%"><strong>${formatCompactNumber(amount)}</strong></div></div>`;
+    const barHeight = Math.max((amount / max) * plotHeight, amount > 0 ? 3 : 0);
+    const x = pad.left + index * (barWidth + barGap);
+    const y = pad.top + plotHeight - barHeight;
+    const label = formatDayLabel(item.date);
+    const showLabel = items.length <= 16 || index % Math.ceil(items.length / 12) === 0;
+    return [
+      `<rect class="bar" x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="4"></rect>`,
+      amount > 0 && items.length <= 12 ? `<text class="bar-text" x="${x + barWidth / 2}" y="${Math.max(y - 7, 12)}" text-anchor="middle">${formatCompactNumber(amount)}</text>` : '',
+      showLabel ? `<text class="tick" x="${x + barWidth / 2}" y="${height - 16}" text-anchor="middle">${escapeHtml(label)}</text>` : ''
+    ].join('');
   }).join('');
-  const labels = items.map((item) => `<div>${escapeHtml(formatDayLabel(item.date))}</div>`).join('');
-  return `<div style="--bars:${items.length}"><div class="chart">${bars}</div><div class="bar-labels">${labels}</div></div>`;
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+    const y = pad.top + plotHeight - ratio * plotHeight;
+    const value = max * ratio;
+    return `<line class="axis" x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}"></line>
+      <text class="tick" x="${pad.left - 8}" y="${y + 4}" text-anchor="end">${formatCompactNumber(value)}</text>`;
+  }).join('');
+  return `<div class="chart-box"><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Bieu do doanh thu">
+    ${yTicks}
+    ${bars}
+  </svg></div>`;
 }
 
 function renderOrdersTable(orders) {
@@ -310,20 +383,6 @@ function renderOrdersTable(orders) {
   }).join('');
   return `<table>
     <thead><tr><th>Request</th><th>So tien</th><th>Bank</th><th>Ma GD</th><th>Thoi gian</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-}
-
-function renderSettlementsTable(settlements) {
-  if (!settlements.length) return '<div class="empty">Chua co lan chot nao.</div>';
-  const rows = settlements.map((settlement) => `<tr>
-    <td><code>${escapeHtml(settlement.settlementId || '-')}</code></td>
-    <td class="amount">${formatNumber(settlement.totalAmount)}</td>
-    <td>${formatNumber(settlement.totalOrders)}</td>
-    <td>${escapeHtml(formatDateTime(settlement.closedAt))}</td>
-  </tr>`).join('');
-  return `<table>
-    <thead><tr><th>Ma chot</th><th>Doanh thu</th><th>Lenh</th><th>Thoi gian</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -369,6 +428,7 @@ function buildRangeQuery(token, range) {
   return new URLSearchParams({
     token,
     period: range.period,
+    days: String(range.days),
     date: range.date,
     month: range.month,
     start: range.startDate,
@@ -377,7 +437,13 @@ function buildRangeQuery(token, range) {
 }
 
 function normalizePeriod(value) {
-  return ['day', 'week', 'month', 'custom'].includes(value) ? value : 'day';
+  return ['last', 'day', 'week', 'month', 'custom'].includes(value) ? value : 'day';
+}
+
+function normalizeDays(value) {
+  const days = Number(value || 1);
+  if (!Number.isInteger(days) || days < 1) return 1;
+  return Math.min(days, 90);
 }
 
 function normalizeDate(value) {
