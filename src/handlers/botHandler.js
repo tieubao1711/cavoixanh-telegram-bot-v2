@@ -3,6 +3,7 @@ const { handleNapTienCommand, handleRechargeCallbackQuery } = require('./recharg
 const { handleRutTienCommand, handleDanhSachRutCommand } = require('./withdrawHandler');
 const { handleThongKeCommand } = require('./statsHandler');
 const { handleChotDoanhThuCommand, handleLichSuChotCommand } = require('./settlementHandler');
+const { handleDoanhThuCommand } = require('./revenueDashboardHandler');
 const { commandRegex } = require('../utils/botUtils');
 
 function registerBot(bot) {
@@ -28,6 +29,10 @@ function registerBot(bot) {
 
   bot.onText(commandRegex('thongke'), async (msg, match) => {
     await handleThongKeCommand(bot, msg, match);
+  });
+
+  bot.onText(commandRegex('doanhthu', false), async (msg) => {
+    await handleDoanhThuCommand(bot, msg);
   });
 
   bot.onText(commandRegex('chotdoanhthu', false), async (msg) => {

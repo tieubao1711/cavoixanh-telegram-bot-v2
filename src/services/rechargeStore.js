@@ -153,6 +153,43 @@ async function getUnsettledSuccessfulRechargeOrders() {
     .toArray();
 }
 
+async function getUnsettledRevenueSummary() {
+  const collection = await getCollection('recharge_orders');
+  const [summary] = await collection.aggregate([
+    {
+      $match: {
+        status: 'success',
+        settlementId: { $exists: false }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalAmount: { $sum: { $ifNull: ['$chargeAmount', '$amount'] } },
+        totalOrders: { $sum: 1 },
+        firstCompletedAt: { $min: { $ifNull: ['$completedAt', '$updatedAt'] } },
+        lastCompletedAt: { $max: { $ifNull: ['$completedAt', '$updatedAt'] } }
+      }
+    }
+  ]).toArray();
+
+  return {
+    totalAmount: summary?.totalAmount || 0,
+    totalOrders: summary?.totalOrders || 0,
+    firstCompletedAt: summary?.firstCompletedAt || null,
+    lastCompletedAt: summary?.lastCompletedAt || null
+  };
+}
+
+async function getRecentSuccessfulRechargeOrders(limit = 20) {
+  const collection = await getCollection('recharge_orders');
+  return collection
+    .find({ status: 'success' })
+    .sort({ completedAt: -1, updatedAt: -1, createdAt: -1 })
+    .limit(Math.min(Math.max(Number(limit) || 20, 1), 100))
+    .toArray();
+}
+
 async function createRevenueSettlement(settlement) {
   const collection = await getCollection('revenue_settlements');
   await collection.insertOne(settlement);
@@ -195,6 +232,8 @@ module.exports = {
   markCallbackNotified,
   getRechargeStats,
   getUnsettledSuccessfulRechargeOrders,
+  getUnsettledRevenueSummary,
+  getRecentSuccessfulRechargeOrders,
   createRevenueSettlement,
   markRechargeOrdersSettled,
   getRecentRevenueSettlements

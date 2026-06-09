@@ -10,6 +10,7 @@ assert.ok(commandRegex('naptien').test('/naptien@BotUsername 50000'));
 assert.ok(commandRegex('ruttien').test('/ruttien@BotUsername'));
 assert.ok(commandRegex('danhsachrut').test('/danhsachrut@BotUsername mine'));
 assert.ok(commandRegex('thongke').test('/thongke@BotUsername week'));
+assert.ok(commandRegex('doanhthu', false).test('/doanhthu@BotUsername'));
 assert.ok(commandRegex('chotdoanhthu', false).test('/chotdoanhthu@BotUsername'));
 assert.ok(commandRegex('lichsuchot', false).test('/lichsuchot@BotUsername'));
 assert.deepStrictEqual(parseRechargeBankCallbackData('rb:dep_123:2'), {

@@ -8,6 +8,7 @@ function buildUsageMessage() {
     '<code>/ruttien</code> hoac <code>/ruttien 100000</code> - tao link form rut tien',
     '<code>/danhsachrut</code> hoac <code>/danhsachrut mine</code> - xem cac lenh rut gan nhat',
     '<code>/thongke</code>, <code>/thongke week</code>, <code>/thongke month</code> - xem doanh thu nap thanh cong',
+    '<code>/doanhthu</code> - tao link dashboard doanh thu tren web',
     '<code>/chotdoanhthu</code> - chot cac lenh nap thanh cong chua doi soat va xuat XLSX',
     '<code>/lichsuchot</code> - xem 10 lan chot doanh thu gan nhat',
     '',

@@ -6,6 +6,7 @@ Bot Telegram Node.js rieng cho cong thanh toan. Bot dung `node-telegram-bot-api`
 - `/ruttien`
 - `/danhsachrut`
 - `/thongke`
+- `/doanhthu`
 - `/chotdoanhthu`
 - `/lichsuchot`
 
@@ -71,6 +72,12 @@ Form rut tien nam tai:
 
 ```text
 http://localhost:RECHARGE_CALLBACK_PORT/withdraw?token=...
+```
+
+Dashboard doanh thu tu lenh `/doanhthu` nam tai:
+
+```text
+http://localhost:RECHARGE_CALLBACK_PORT/revenue?token=...
 ```
 
 ## Kiem tra

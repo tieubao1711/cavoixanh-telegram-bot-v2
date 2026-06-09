@@ -5,6 +5,7 @@ const { verifyRechargeCallbackSignature } = require('./rechargeApiClient');
 const { markRechargeCallback, markCallbackNotified } = require('./rechargeStore');
 const { markWithdrawCallback, markWithdrawCallbackNotified } = require('./withdrawStore');
 const { handleWithdrawWebRequest } = require('./withdrawWeb');
+const { handleRevenueWebRequest } = require('./revenueWeb');
 const { escapeHtml, formatNumber } = require('../utils/formatters');
 
 function sendJson(res, statusCode, body) {
@@ -21,6 +22,7 @@ function startRechargeCallbackServer(bot) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${env.rechargeCallbackPort}`);
 
+    if (await handleRevenueWebRequest(req, res, url)) return;
     if (await handleWithdrawWebRequest(req, res, url)) return;
 
     if (req.method !== 'GET' || url.pathname !== env.rechargeCallbackPath) {
