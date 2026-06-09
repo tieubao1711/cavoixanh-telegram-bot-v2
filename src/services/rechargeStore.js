@@ -190,6 +190,15 @@ async function getRecentSuccessfulRechargeOrders(limit = 20) {
     .toArray();
 }
 
+async function getSuccessfulRechargeOrdersByRange(startAt, endAt, limit = 500) {
+  const collection = await getCollection('recharge_orders');
+  return collection
+    .find(successRangeMatch(startAt, endAt))
+    .sort({ completedAt: -1, updatedAt: -1, createdAt: -1 })
+    .limit(Math.min(Math.max(Number(limit) || 500, 1), 2000))
+    .toArray();
+}
+
 async function createRevenueSettlement(settlement) {
   const collection = await getCollection('revenue_settlements');
   await collection.insertOne(settlement);
@@ -234,6 +243,7 @@ module.exports = {
   getUnsettledSuccessfulRechargeOrders,
   getUnsettledRevenueSummary,
   getRecentSuccessfulRechargeOrders,
+  getSuccessfulRechargeOrdersByRange,
   createRevenueSettlement,
   markRechargeOrdersSettled,
   getRecentRevenueSettlements
