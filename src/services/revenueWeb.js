@@ -5,6 +5,10 @@ const {
   getUnsettledRevenueSummary,
   getSuccessfulRechargeOrdersByRange
 } = require('./rechargeStore');
+const {
+  getWithdrawStatsByRange,
+  getWithdrawOrdersByRange
+} = require('./withdrawStore');
 const { createXlsxBuffer } = require('../utils/xlsxWriter');
 const { escapeHtml, formatNumber, formatDateTime } = require('../utils/formatters');
 
@@ -55,14 +59,16 @@ async function handleRevenueWebRequest(req, res, url) {
 
   try {
     const range = getRevenueRange(url.searchParams);
-    const [stats, orders, unsettled] = await Promise.all([
+    const [stats, orders, unsettled, withdrawStats, withdrawOrders] = await Promise.all([
       getRechargeStats(range.start, range.end),
       getSuccessfulRechargeOrdersByRange(range.start, range.end, 500),
-      getUnsettledRevenueSummary()
+      getUnsettledRevenueSummary(),
+      getWithdrawStatsByRange(range.start, range.end),
+      getWithdrawOrdersByRange(range.start, range.end, 500)
     ]);
 
     if (url.pathname === '/revenue/export') {
-      const buffer = await buildRevenueExport({ range, stats, orders });
+      const buffer = await buildRevenueExport({ range, stats, orders, withdrawStats, withdrawOrders });
       sendXlsx(res, `doanh-thu-${range.fileSuffix}.xlsx`, buffer);
       return true;
     }
@@ -73,7 +79,9 @@ async function handleRevenueWebRequest(req, res, url) {
       range,
       stats,
       orders,
-      unsettled
+      unsettled,
+      withdrawStats,
+      withdrawOrders
     }));
     return true;
   } catch (error) {
@@ -183,15 +191,16 @@ function getRevenueRange(params) {
   };
 }
 
-function renderRevenueDashboard({ token, session, range, stats, orders, unsettled }) {
+function renderRevenueDashboard({ token, session, range, stats, orders, unsettled, withdrawStats, withdrawOrders }) {
   const exportUrl = `/revenue/export?${buildRangeQuery(token, range)}`;
+  const netAmount = stats.totalAmount - withdrawStats.totalAmount;
   return `<!doctype html>
 <html lang="vi">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="90">
-  <title>Doanh thu</title>
+  <title>Tong quan thanh toan</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #f3f5f7; color: #172033; font-family: Arial, sans-serif; }
@@ -208,18 +217,22 @@ function renderRevenueDashboard({ token, session, range, stats, orders, unsettle
     .quick { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
     .quick a { border: 1px solid #c7d3df; border-radius: 7px; padding: 8px 10px; font-size: 13px; font-weight: 800; color: #26364d; background: #fff; }
     .quick a.active { background: #075fb8; border-color: #075fb8; color: #fff; }
-    form { display: grid; grid-template-columns: 150px repeat(4, minmax(130px, 1fr)) auto; gap: 10px; align-items: end; }
+    form { display: grid; grid-template-columns: 180px minmax(190px, 260px) auto; gap: 10px; align-items: end; }
     label { display: grid; gap: 5px; color: #526173; font-size: 12px; font-weight: 800; }
+    .field { display: none; }
+    .field.active { display: grid; }
+    .range-fields.active { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     input, select, button, .button { min-height: 40px; border-radius: 7px; border: 1px solid #bac7d5; background: #fff; color: #172033; padding: 9px 10px; font-size: 14px; }
     button, .button { border: 0; background: #075fb8; color: #fff; font-weight: 800; cursor: pointer; text-align: center; }
     .button.secondary { background: #172033; }
-    .cards { display: grid; grid-template-columns: 1.35fr repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+    .cards { display: grid; grid-template-columns: 1.25fr 1.25fr repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
     .card { padding: 15px; min-height: 98px; }
     .label { color: #647184; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
     .value { font-size: 24px; font-weight: 800; line-height: 1.15; }
     .cards .card:first-child .value { font-size: 30px; }
     .meta { margin-top: 6px; color: #647184; font-size: 13px; }
     section { padding: 15px; overflow: hidden; margin-bottom: 12px; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .chart-box { width: 100%; overflow-x: auto; }
     svg { display: block; min-width: 760px; width: 100%; height: 280px; }
     .axis { stroke: #d9e2ec; stroke-width: 1; }
@@ -231,16 +244,20 @@ function renderRevenueDashboard({ token, session, range, stats, orders, unsettle
     th { color: #526173; font-size: 12px; text-transform: uppercase; letter-spacing: 0; background: #fbfcfe; }
     td.amount { font-weight: 800; white-space: nowrap; }
     code { background: #f1f4f8; border-radius: 5px; padding: 2px 5px; }
+    .status { display: inline-block; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 800; background: #eef2f6; color: #526173; }
+    .status.success { background: #e7f6ee; color: #0f7a3d; }
+    .status.pending { background: #fff5dc; color: #8a5b00; }
+    .status.failed { background: #fff0f0; color: #b42318; }
     .empty { color: #647184; padding: 14px 0; }
-    @media (max-width: 980px) { header { display: block; } .actions { justify-content: flex-start; margin-top: 12px; } form, .cards { grid-template-columns: 1fr; } table { font-size: 13px; } th:nth-child(4), td:nth-child(4) { display: none; } }
+    @media (max-width: 980px) { header { display: block; } .actions { justify-content: flex-start; margin-top: 12px; } form, .cards, .split, .range-fields.active { grid-template-columns: 1fr; } table { font-size: 13px; } th:nth-child(4), td:nth-child(4) { display: none; } }
   </style>
 </head>
 <body>
   <main>
     <header>
       <div>
-        <h1>Doanh thu</h1>
-        <p>${escapeHtml(range.label)}. Tu dong cap nhat moi 90 giay.</p>
+        <h1>Tong quan thanh toan</h1>
+        <p>${escapeHtml(range.label)}. Nap, rut va dong tien rong trong cung mot man hinh.</p>
       </div>
       <div class="actions">
         <a class="button secondary" href="${escapeHtml(exportUrl)}">Xuat Excel</a>
@@ -253,23 +270,43 @@ function renderRevenueDashboard({ token, session, range, stats, orders, unsettle
     </div>
 
     <div class="cards">
-      ${renderMetricCard('Doanh thu filter', stats.totalAmount, `${formatNumber(stats.totalOrders)} lenh thanh cong`)}
-      ${renderMetricCard('Gia tri trung binh', stats.totalOrders ? Math.round(stats.totalAmount / stats.totalOrders) : 0, 'Trung binh moi lenh')}
-      ${renderMetricCard('Chua chot', unsettled.totalAmount, `${formatNumber(unsettled.totalOrders)} lenh dang doi soat`)}
-      ${renderMetricCard('So lenh', stats.totalOrders, `${escapeHtml(range.startDate)} den ${escapeHtml(range.endDate)}`)}
+      ${renderMetricCard('Nap thanh cong', stats.totalAmount, `${formatNumber(stats.totalOrders)} lenh nap`)}
+      ${renderMetricCard('Rut thanh cong', withdrawStats.totalAmount, `${formatNumber(withdrawStats.totalOrders)} lenh rut`)}
+      ${renderMetricCard('Dong tien rong', netAmount, 'Nap tru rut')}
+      ${renderMetricCard('Rut dang xu ly', withdrawStats.pendingAmount, `${formatNumber(withdrawStats.pendingOrders)} lenh`)}
+      ${renderMetricCard('Nap chua chot', unsettled.totalAmount, `${formatNumber(unsettled.totalOrders)} lenh`)}
     </div>
 
     <section>
-      <h2>Xu huong doanh thu</h2>
+      <h2>Xu huong nap tien</h2>
       ${renderRevenueChart(stats.byDay)}
     </section>
 
-    <section>
-      <h2>Lenh nap thanh cong</h2>
-      ${renderOrdersTable(orders)}
-    </section>
+    <div class="split">
+      <section>
+        <h2>Lenh nap</h2>
+        ${renderOrdersTable(orders)}
+      </section>
+      <section>
+        <h2>Lenh rut</h2>
+        ${renderWithdrawOrdersTable(withdrawOrders)}
+      </section>
+    </div>
   </main>
-</body>
+    <script>
+      const periodSelect = document.querySelector('[name="period"]');
+      const fields = Array.from(document.querySelectorAll('[data-period-field]'));
+      function syncFields() {
+        const period = periodSelect.value;
+        fields.forEach((field) => {
+          const modes = field.dataset.periodField.split(',');
+          field.classList.toggle('active', modes.includes(period));
+        });
+      }
+      periodSelect.addEventListener('change', syncFields);
+      syncFields();
+    </script>
+  </body>
 </html>`;
 }
 
@@ -286,11 +323,13 @@ function renderFilterForm(token, range, exportUrl) {
         ${renderOption('custom', 'Khoang ngay', range.period)}
       </select>
     </label>
-    <label>So ngay<input type="number" name="days" min="1" max="90" value="${escapeHtml(range.days)}"></label>
-    <label>Ngay<input type="date" name="date" value="${escapeHtml(range.date)}"></label>
-    <label>Thang<input type="month" name="month" value="${escapeHtml(range.month)}"></label>
-    <label>Tu ngay<input type="date" name="start" value="${escapeHtml(range.startDate)}"></label>
-    <label>Den ngay<input type="date" name="end" value="${escapeHtml(range.endDate)}"></label>
+    <label class="field" data-period-field="last">So ngay<input type="number" name="days" min="1" max="90" value="${escapeHtml(range.days)}"></label>
+    <label class="field" data-period-field="day,week">Ngay<input type="date" name="date" value="${escapeHtml(range.date)}"></label>
+    <label class="field" data-period-field="month">Thang<input type="month" name="month" value="${escapeHtml(range.month)}"></label>
+    <div class="field range-fields" data-period-field="custom">
+      <label>Tu ngay<input type="date" name="start" value="${escapeHtml(range.startDate)}"></label>
+      <label>Den ngay<input type="date" name="end" value="${escapeHtml(range.endDate)}"></label>
+    </div>
     <button type="submit">Loc</button>
   </form>`;
 }
@@ -387,14 +426,44 @@ function renderOrdersTable(orders) {
   </table>`;
 }
 
-async function buildRevenueExport({ range, stats, orders }) {
+function renderWithdrawOrdersTable(orders) {
+  if (!orders.length) return '<div class="empty">Khong co lenh rut trong filter.</div>';
+  const rows = orders.map((order) => {
+    const amount = Number(order.chargeAmount ?? order.amount ?? 0);
+    return `<tr>
+      <td><code>${escapeHtml(order.requestId || '-')}</code></td>
+      <td class="amount">${formatNumber(amount)}</td>
+      <td>${escapeHtml(order.bankName || order.bankCode || '-')}</td>
+      <td><span class="status ${escapeHtml(getStatusClass(order.status))}">${escapeHtml(order.status || '-')}</span></td>
+      <td>${escapeHtml(formatDateTime(order.completedAt || order.updatedAt || order.createdAt))}</td>
+    </tr>`;
+  }).join('');
+  return `<table>
+    <thead><tr><th>Request</th><th>So tien</th><th>Bank</th><th>Trang thai</th><th>Thoi gian</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function getStatusClass(status) {
+  if (status === 'success') return 'success';
+  if (['waiting', 'processing', 'waitLink', 'pending', 'nCheck', 'submitted'].includes(status)) return 'pending';
+  if (['failed', 'deleted', 'cancel', 'timeout'].includes(status)) return 'failed';
+  return '';
+}
+
+async function buildRevenueExport({ range, stats, orders, withdrawStats, withdrawOrders }) {
   const summaryRows = [
-    ['Bao cao', 'Doanh thu'],
+    ['Bao cao', 'Tong quan thanh toan'],
     ['Filter', range.label],
     ['Tu ngay', range.startDate],
     ['Den ngay', range.endDate],
-    ['Tong doanh thu', stats.totalAmount],
-    ['Tong lenh thanh cong', stats.totalOrders],
+    ['Tong nap thanh cong', stats.totalAmount],
+    ['So lenh nap thanh cong', stats.totalOrders],
+    ['Tong rut thanh cong', withdrawStats.totalAmount],
+    ['So lenh rut thanh cong', withdrawStats.totalOrders],
+    ['Dong tien rong', stats.totalAmount - withdrawStats.totalAmount],
+    ['Rut dang xu ly', withdrawStats.pendingAmount],
+    ['So lenh rut dang xu ly', withdrawStats.pendingOrders],
     ['Xuat luc', formatDateTime(new Date())]
   ];
   const chartRows = [
@@ -416,11 +485,28 @@ async function buildRevenueExport({ range, stats, orders }) {
       order.chatId || ''
     ])
   ];
+  const withdrawRows = [
+    ['STT', 'Request ID', 'So tien', 'Trang thai', 'Ngan hang', 'STK', 'Ten TK', 'Thoi gian tao', 'Thoi gian cap nhat', 'Telegram user', 'Chat ID'],
+    ...withdrawOrders.map((order, index) => [
+      index + 1,
+      order.requestId || '',
+      Number(order.chargeAmount ?? order.amount ?? 0),
+      order.status || '',
+      order.bankName || order.bankCode || '',
+      order.bankAccount || '',
+      order.bankAccountName || '',
+      formatDateTime(order.createdAt),
+      formatDateTime(order.completedAt || order.updatedAt),
+      order.telegramUsername || order.userId || '',
+      order.chatId || ''
+    ])
+  ];
 
   return createXlsxBuffer([
     { name: 'Tong quan', rows: summaryRows },
     { name: 'Theo ngay', rows: chartRows },
-    { name: 'Lenh nap', rows: orderRows }
+    { name: 'Lenh nap', rows: orderRows },
+    { name: 'Lenh rut', rows: withdrawRows }
   ]);
 }
 

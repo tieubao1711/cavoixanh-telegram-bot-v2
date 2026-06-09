@@ -296,6 +296,73 @@ async function listWithdrawOrders({ limit = 10, userId } = {}) {
     .toArray();
 }
 
+function withdrawRangeMatch(startAt, endAt) {
+  return {
+    $or: [
+      { completedAt: { $gte: startAt, $lt: endAt } },
+      {
+        completedAt: { $exists: false },
+        updatedAt: { $gte: startAt, $lt: endAt }
+      },
+      {
+        completedAt: null,
+        updatedAt: { $gte: startAt, $lt: endAt }
+      }
+    ]
+  };
+}
+
+async function getWithdrawStatsByRange(startAt, endAt) {
+  const collection = await getCollection('withdraw_orders');
+  const [summary] = await collection.aggregate([
+    {
+      $match: {
+        status: 'success',
+        ...withdrawRangeMatch(startAt, endAt)
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalAmount: { $sum: { $ifNull: ['$chargeAmount', '$amount'] } },
+        totalOrders: { $sum: 1 }
+      }
+    }
+  ]).toArray();
+
+  const [pending] = await collection.aggregate([
+    {
+      $match: {
+        status: { $in: Array.from(ACTIVE_CANCEL_STATUSES) },
+        createdAt: { $gte: startAt, $lt: endAt }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalAmount: { $sum: '$amount' },
+        totalOrders: { $sum: 1 }
+      }
+    }
+  ]).toArray();
+
+  return {
+    totalAmount: summary?.totalAmount || 0,
+    totalOrders: summary?.totalOrders || 0,
+    pendingAmount: pending?.totalAmount || 0,
+    pendingOrders: pending?.totalOrders || 0
+  };
+}
+
+async function getWithdrawOrdersByRange(startAt, endAt, limit = 500) {
+  const collection = await getCollection('withdraw_orders');
+  return collection
+    .find(withdrawRangeMatch(startAt, endAt))
+    .sort({ completedAt: -1, updatedAt: -1, createdAt: -1 })
+    .limit(Math.min(Math.max(Number(limit) || 500, 1), 2000))
+    .toArray();
+}
+
 module.exports = {
   createWithdrawSession,
   getUsableWithdrawSession,
@@ -314,5 +381,7 @@ module.exports = {
   canCheckWithdrawOrder,
   canCancelWithdrawOrder,
   markWithdrawCallbackNotified,
-  listWithdrawOrders
+  listWithdrawOrders,
+  getWithdrawStatsByRange,
+  getWithdrawOrdersByRange
 };
