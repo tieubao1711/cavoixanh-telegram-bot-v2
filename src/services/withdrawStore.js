@@ -26,7 +26,7 @@ function hashApprovalCode(code) {
   return crypto.createHash('sha256').update(String(code)).digest('hex');
 }
 
-async function createWithdrawSession({ chatId, userId, telegramUsername, amount }) {
+async function createWithdrawSession({ chatId, userId, telegramUsername, amount, quantity }) {
   const collection = await getCollection('withdraw_sessions');
   const token = createToken();
   const approvalCode = createApprovalCode();
@@ -37,6 +37,7 @@ async function createWithdrawSession({ chatId, userId, telegramUsername, amount 
     userId,
     telegramUsername,
     amount: amount || null,
+    quantity: normalizeQuantity(quantity),
     submitNonce: createSessionNonce(),
     approvalCodeHash: hashApprovalCode(approvalCode),
     approvalAttempts: 0,
@@ -139,12 +140,14 @@ async function verifyWithdrawApprovalCode(token, session, code) {
 
 async function markWithdrawSessionUsed(token, requestId) {
   const collection = await getCollection('withdraw_sessions');
+  const requestIds = Array.isArray(requestId) ? requestId : [requestId];
   await collection.updateOne(
     { tokenHash: hashToken(token) },
     {
       $set: {
         status: 'used',
-        requestId,
+        requestId: requestIds[0],
+        requestIds,
         usedAt: new Date(),
         updatedAt: new Date(),
         expiresAt: new Date(Date.now() + USED_SESSION_TTL_MS)
@@ -199,6 +202,17 @@ async function getWithdrawOrderBySessionToken(token) {
   const session = await getUsableWithdrawSession(token);
   if (!session?.requestId) return null;
   return getWithdrawOrderByRequestId(session.requestId);
+}
+
+async function getWithdrawOrdersBySessionToken(token) {
+  const session = await getUsableWithdrawSession(token);
+  const requestIds = session?.requestIds || (session?.requestId ? [session.requestId] : []);
+  if (!requestIds.length) return [];
+  const collection = await getCollection('withdraw_orders');
+  return collection
+    .find({ requestId: { $in: requestIds } })
+    .sort({ batchIndex: 1, createdAt: 1 })
+    .toArray();
 }
 
 async function markWithdrawCallback(requestId, callbackPayload) {
@@ -312,6 +326,12 @@ function withdrawRangeMatch(startAt, endAt) {
   };
 }
 
+function normalizeQuantity(value) {
+  const quantity = Number(value || 1);
+  if (!Number.isInteger(quantity) || quantity < 1) return 1;
+  return Math.min(quantity, 100);
+}
+
 async function getWithdrawStatsByRange(startAt, endAt) {
   const collection = await getCollection('withdraw_orders');
   const [summary] = await collection.aggregate([
@@ -375,6 +395,7 @@ module.exports = {
   updateWithdrawOrderAfterSubmit,
   getWithdrawOrderByRequestId,
   getWithdrawOrderBySessionToken,
+  getWithdrawOrdersBySessionToken,
   markWithdrawCallback,
   markWithdrawCheckResult,
   markWithdrawCancelResult,

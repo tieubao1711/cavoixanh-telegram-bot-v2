@@ -16,7 +16,7 @@ const {
   markWithdrawSessionUsed,
   createWithdrawOrder,
   updateWithdrawOrderAfterSubmit,
-  getWithdrawOrderBySessionToken,
+  getWithdrawOrdersBySessionToken,
   markWithdrawCheckResult,
   markWithdrawCancelResult,
   canCheckWithdrawOrder,
@@ -72,6 +72,7 @@ function renderWithdrawPage({ token, session, banks, initialOrder = null }) {
     return `<option value="${code}" data-label="${label}">${name} (${code})</option>`;
   }).join('');
   const amountValue = session.amount ? String(session.amount) : '';
+  const quantityValue = session.quantity ? String(session.quantity) : '1';
 
   return `<!doctype html>
 <html lang="vi">
@@ -121,6 +122,12 @@ function renderWithdrawPage({ token, session, banks, initialOrder = null }) {
           <label for="amount">So tien</label>
           <input id="amount" name="amount" inputmode="numeric" value="${escapeHtml(amountValue)}" placeholder="100000" required>
         </div>
+        <div class="field">
+          <label for="quantity">So luong lenh</label>
+          <input id="quantity" name="quantity" inputmode="numeric" value="${escapeHtml(quantityValue)}" min="1" max="100" required>
+        </div>
+      </div>
+      <div class="grid">
         <div class="field">
           <label for="bankSearch">Tim ngan hang</label>
           <input id="bankSearch" autocomplete="off" placeholder="VCB, Vietcombank">
@@ -203,7 +210,31 @@ function renderWithdrawPage({ token, session, banks, initialOrder = null }) {
       statusDetails.innerHTML = [renderDetail('Ma lenh', order.requestId), renderDetail('Provider ID', order.providerChargeId), renderDetail('So tien', formatMoney(order.amount)), renderDetail('Ngan hang', order.bankName || order.bankCode), renderDetail('So TK', order.bankAccount), renderDetail('Ten TK', order.bankAccountName)].join('');
       cancelBtn.disabled = !order.canCancel;
     }
-    if (initialOrder) renderOrder(initialOrder);
+    function renderOrders(orders) {
+      if (!orders || !orders.length) return;
+      if (orders.length === 1) {
+        renderOrder(orders[0]);
+        return;
+      }
+      statusPanel.style.display = 'block';
+      const total = orders.reduce((sum, order) => sum + Number(order.amount || 0), 0);
+      const success = orders.filter((order) => order.status === 'success').length;
+      statusPill.textContent = success + '/' + orders.length + ' thanh cong';
+      statusPill.className = 'status-pill';
+      statusDetails.innerHTML = [
+        renderDetail('So luong lenh', orders.length),
+        renderDetail('Tong tien', formatMoney(total)),
+        renderDetail('Lenh thanh cong', success),
+        renderDetail('Ngan hang', orders[0].bankName || orders[0].bankCode),
+        renderDetail('So TK', orders[0].bankAccount),
+        renderDetail('Ten TK', orders[0].bankAccountName)
+      ].join('') + '<div style="grid-column:1/-1;overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid #d8e0ea;">Ma lenh</th><th style="text-align:left;padding:8px;border-bottom:1px solid #d8e0ea;">So tien</th><th style="text-align:left;padding:8px;border-bottom:1px solid #d8e0ea;">Trang thai</th></tr></thead><tbody>' + orders.map((order) => '<tr><td style="padding:8px;border-bottom:1px solid #edf1f5;">' + order.requestId + '</td><td style="padding:8px;border-bottom:1px solid #edf1f5;">' + formatMoney(order.amount) + '</td><td style="padding:8px;border-bottom:1px solid #edf1f5;">' + getStatusLabel(order.status) + '</td></tr>').join('') + '</tbody></table></div>';
+      cancelBtn.disabled = !orders.some((order) => order.canCancel);
+    }
+    if (initialOrder) {
+      if (Array.isArray(initialOrder)) renderOrders(initialOrder);
+      else renderOrder(initialOrder);
+    }
     bankSearch.addEventListener('input', () => {
       const keyword = bankSearch.value.trim().toLowerCase();
       const current = bankCode.value;
@@ -224,7 +255,7 @@ function renderWithdrawPage({ token, session, banks, initialOrder = null }) {
       try {
         const data = await callApi('/withdraw/submit', Object.fromEntries(new FormData(form).entries()));
         form.style.display = 'none';
-        renderOrder(data.order);
+        renderOrders(data.orders || (data.order ? [data.order] : []));
       } catch (error) { setError(formError, error.message); } finally { done(); }
     });
     checkBtn.addEventListener('click', async () => {
@@ -232,7 +263,7 @@ function renderWithdrawPage({ token, session, banks, initialOrder = null }) {
       const done = setButtonLoading(checkBtn, 'Dang kiem tra...');
       try {
         const data = await callApi('/withdraw/status');
-        renderOrder(data.order);
+        renderOrders(data.orders || (data.order ? [data.order] : []));
         if (data.throttled) setError(actionError, 'Vua kiem tra gan day, dang hien thi trang thai da luu.');
       } catch (error) { setError(actionError, error.message); } finally { done(); }
     });
@@ -242,7 +273,7 @@ function renderWithdrawPage({ token, session, banks, initialOrder = null }) {
       const done = setButtonLoading(cancelBtn, 'Dang huy...');
       try {
         const data = await callApi('/withdraw/cancel');
-        renderOrder(data.order);
+        renderOrders(data.orders || (data.order ? [data.order] : []));
         if (data.message) setError(actionError, data.message);
       } catch (error) { setError(actionError, error.message); } finally { done(); }
     });
@@ -291,6 +322,7 @@ async function readJsonBody(req) {
 
 function validateSubmitPayload(payload) {
   const amount = Number(String(payload.amount || '').replace(/[,. ]/g, ''));
+  const quantity = Number(String(payload.quantity || '1').replace(/[,. ]/g, ''));
   const bankCode = String(payload.bankCode || '').trim();
   const bankAccount = String(payload.bankAccount || '').trim();
   const bankAccountName = String(payload.bankAccountName || '').trim();
@@ -299,13 +331,14 @@ function validateSubmitPayload(payload) {
   const approvalCode = String(payload.approvalCode || '').trim();
 
   if (!Number.isInteger(amount) || amount <= 0) throw new Error('So tien khong hop le.');
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) throw new Error('So luong lenh phai tu 1 den 100.');
   if (!bankCode) throw new Error('Vui long chon ngan hang.');
   if (!bankAccount) throw new Error('Vui long nhap so tai khoan.');
   if (!bankAccountName) throw new Error('Vui long nhap ten chu tai khoan.');
   if (confirmInfo !== 'yes') throw new Error('Vui long xac nhan thong tin rut tien da chinh xac.');
   if (!/^\d{6}$/.test(approvalCode)) throw new Error('Vui long nhap ma xac thuc 6 so.');
 
-  return { amount, bankCode, bankAccount, bankAccountName, message, approvalCode };
+  return { amount, quantity, bankCode, bankAccount, bankAccountName, message, approvalCode };
 }
 
 async function handleWithdrawWebRequest(req, res, url) {
@@ -329,9 +362,9 @@ async function handleWithdrawWebRequest(req, res, url) {
       await touchWithdrawSession(token);
       const submitNonce = await refreshWithdrawSessionNonce(token);
       const renderSession = { ...session, submitNonce };
-      const existingOrder = await getWithdrawOrderBySessionToken(token);
-      if (existingOrder) {
-        sendHtml(res, 200, renderWithdrawPage({ token, session: renderSession, banks: [], initialOrder: serializeOrder(existingOrder) }));
+      const existingOrders = await getWithdrawOrdersBySessionToken(token);
+      if (existingOrders.length) {
+        sendHtml(res, 200, renderWithdrawPage({ token, session: renderSession, banks: [], initialOrder: existingOrders.map(serializeOrder) }));
         return true;
       }
 
@@ -346,9 +379,9 @@ async function handleWithdrawWebRequest(req, res, url) {
     }
 
     if (req.method === 'POST' && url.pathname === '/withdraw/submit') {
-      const existingOrder = await getWithdrawOrderBySessionToken(token);
-      if (existingOrder) {
-        sendJson(res, 200, { ok: true, order: serializeOrder(existingOrder) });
+      const existingOrders = await getWithdrawOrdersBySessionToken(token);
+      if (existingOrders.length) {
+        sendJson(res, 200, { ok: true, orders: existingOrders.map(serializeOrder) });
         return true;
       }
 
@@ -363,71 +396,87 @@ async function handleWithdrawWebRequest(req, res, url) {
       const bank = normalizeBanks(bankResponse).find((item) => item.code === payload.bankCode);
       if (!bank) throw new Error('Ngan hang khong hop le.');
 
-      const requestId = createRequestId();
-      await createWithdrawOrder({
-        requestId,
-        chatId: session.chatId,
-        userId: session.userId,
-        telegramUsername: session.telegramUsername || '',
-        memberIdentity: String(session.userId),
-        amount: payload.amount,
-        bankCode: bank.code,
-        bankName: bank.name || bank.code,
-        bankAccount: payload.bankAccount,
-        bankAccountName: payload.bankAccountName,
-        message: payload.message
-      });
+      const batchId = `wdb_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const orders = [];
+      const requestIds = [];
+      for (let index = 0; index < payload.quantity; index += 1) {
+        const requestId = createRequestId();
+        requestIds.push(requestId);
+        await createWithdrawOrder({
+          requestId,
+          batchId,
+          batchIndex: index + 1,
+          batchTotal: payload.quantity,
+          chatId: session.chatId,
+          userId: session.userId,
+          telegramUsername: session.telegramUsername || '',
+          memberIdentity: String(session.userId),
+          amount: payload.amount,
+          bankCode: bank.code,
+          bankName: bank.name || bank.code,
+          bankAccount: payload.bankAccount,
+          bankAccountName: payload.bankAccountName,
+          message: payload.message
+        });
 
-      const apiResponse = await createWithdrawCharge({
-        bankCode: bank.code,
-        bankAccount: payload.bankAccount,
-        bankAccountName: payload.bankAccountName,
-        amount: payload.amount,
-        memberIdentity: String(session.userId),
-        requestId,
-        callbackUrl: env.rechargeCallbackPublicUrl || `${getPublicBaseUrl()}${env.rechargeCallbackPath}`,
-        message: payload.message
-      });
-
-      const order = await updateWithdrawOrderAfterSubmit(requestId, apiResponse);
-      await markWithdrawSessionUsed(token, requestId);
-
-      if (apiResponse?.stt !== 1) {
-        sendJson(res, 400, { ok: false, message: apiResponse?.msg || 'Tao lenh rut that bai.', order: serializeOrder(order) });
-        return true;
+        const apiResponse = await createWithdrawCharge({
+          bankCode: bank.code,
+          bankAccount: payload.bankAccount,
+          bankAccountName: payload.bankAccountName,
+          amount: payload.amount,
+          memberIdentity: String(session.userId),
+          requestId,
+          callbackUrl: env.rechargeCallbackPublicUrl || `${getPublicBaseUrl()}${env.rechargeCallbackPath}`,
+          message: payload.message
+        });
+        orders.push(await updateWithdrawOrderAfterSubmit(requestId, apiResponse));
       }
 
-      sendJson(res, 200, { ok: true, order: serializeOrder(order) });
+      await markWithdrawSessionUsed(token, requestIds);
+      sendJson(res, 200, { ok: true, orders: orders.map(serializeOrder) });
       return true;
     }
 
     if (req.method === 'POST' && url.pathname === '/withdraw/status') {
-      const order = await getWithdrawOrderBySessionToken(token);
-      if (!order) throw new Error('Chua co lenh rut.');
-      if (!order.providerChargeId) {
-        sendJson(res, 200, { ok: true, order: serializeOrder(order), throttled: false });
-        return true;
+      const orders = await getWithdrawOrdersBySessionToken(token);
+      if (!orders.length) throw new Error('Chua co lenh rut.');
+      const updatedOrders = [];
+      let throttled = false;
+      for (const order of orders) {
+        if (!order.providerChargeId) {
+          updatedOrders.push(order);
+          continue;
+        }
+        if (!(await canCheckWithdrawOrder(order))) {
+          throttled = true;
+          updatedOrders.push(order);
+          continue;
+        }
+        const response = await checkCharge(order.providerChargeId);
+        updatedOrders.push(await markWithdrawCheckResult(order.requestId, response));
       }
-      if (!(await canCheckWithdrawOrder(order))) {
-        sendJson(res, 200, { ok: true, order: serializeOrder(order), throttled: true });
-        return true;
-      }
-      const response = await checkCharge(order.providerChargeId);
-      const updatedOrder = await markWithdrawCheckResult(order.requestId, response);
-      sendJson(res, 200, { ok: true, order: serializeOrder(updatedOrder), throttled: false });
+      sendJson(res, 200, { ok: true, orders: updatedOrders.map(serializeOrder), throttled });
       return true;
     }
 
     if (req.method === 'POST' && url.pathname === '/withdraw/cancel') {
-      const order = await getWithdrawOrderBySessionToken(token);
-      if (!order) throw new Error('Chua co lenh rut.');
-      if (!canCancelWithdrawOrder(order)) throw new Error('Trang thai hien tai khong the huy.');
-      const response = await cancelCharge(order.providerChargeId);
-      const updatedOrder = await markWithdrawCancelResult(order.requestId, response);
-      sendJson(res, response?.stt === 1 ? 200 : 400, {
-        ok: response?.stt === 1,
-        message: response?.msg || '',
-        order: serializeOrder(updatedOrder)
+      const orders = await getWithdrawOrdersBySessionToken(token);
+      if (!orders.length) throw new Error('Chua co lenh rut.');
+      const cancellable = orders.filter(canCancelWithdrawOrder);
+      if (!cancellable.length) throw new Error('Trang thai hien tai khong the huy.');
+      const updatedOrders = [];
+      for (const order of orders) {
+        if (!canCancelWithdrawOrder(order)) {
+          updatedOrders.push(order);
+          continue;
+        }
+        const response = await cancelCharge(order.providerChargeId);
+        updatedOrders.push(await markWithdrawCancelResult(order.requestId, response));
+      }
+      sendJson(res, 200, {
+        ok: true,
+        message: `Da gui huy ${cancellable.length} lenh co the huy.`,
+        orders: updatedOrders.map(serializeOrder)
       });
       return true;
     }

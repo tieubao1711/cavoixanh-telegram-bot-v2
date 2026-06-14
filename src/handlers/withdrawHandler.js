@@ -18,10 +18,9 @@ async function handleRutTienCommand(bot, msg, match) {
     return;
   }
 
-  const rawAmount = (match?.[1] || '').trim();
-  const amount = rawAmount ? Number(rawAmount.replace(/[,. ]/g, '')) : null;
-  if (rawAmount && (!Number.isInteger(amount) || amount <= 0)) {
-    await bot.sendMessage(chatId, 'Cach dung: /ruttien hoac /ruttien 100000');
+  const { amount, quantity, valid } = parseWithdrawArgs(match?.[1] || '');
+  if (!valid) {
+    await bot.sendMessage(chatId, 'Cach dung: /ruttien, /ruttien 100000, /ruttien 100000 20 hoac /ruttien 100000x20');
     return;
   }
 
@@ -30,7 +29,8 @@ async function handleRutTienCommand(bot, msg, match) {
       chatId,
       userId,
       telegramUsername: msg.from.username || '',
-      amount
+      amount,
+      quantity
     });
     const url = getWithdrawUrl(token);
     const requester = msg.from.username
@@ -41,13 +41,16 @@ async function handleRutTienCommand(bot, msg, match) {
       '<b>Ma xac thuc rut tien</b>',
       `Ma: <code>${approvalCode}</code>`,
       `Nguoi yeu cau: ${escapeHtml(requester)} (<code>${userId}</code>)`,
-      amount ? `So tien yeu cau: <b>${formatNumber(amount)}</b>` : 'So tien: nguoi dung nhap trong form',
+      amount ? `So tien moi lenh: <b>${formatNumber(amount)}</b>` : 'So tien: nguoi dung nhap trong form',
+      `So luong lenh: <b>${formatNumber(quantity)}</b>`,
+      amount && quantity > 1 ? `Tong tien du kien: <b>${formatNumber(amount * quantity)}</b>` : '',
       'Chi cung cap ma nay neu ban dong y cho tao lenh rut.'
-    ].join('\n'), { parse_mode: 'HTML' });
+    ].filter(Boolean).join('\n'), { parse_mode: 'HTML' });
 
     await bot.sendMessage(chatId, [
       '<b>Form rut tien</b>',
-      amount ? `So tien: <b>${formatNumber(amount)}</b>` : 'Ban co the nhap so tien trong form.',
+      amount ? `So tien moi lenh: <b>${formatNumber(amount)}</b>` : 'Ban co the nhap so tien trong form.',
+      `So luong lenh: <b>${formatNumber(quantity)}</b>`,
       'Ma xac thuc da duoc gui cho nguoi duyet. Ban can nhap dung ma do trong form.',
       'Link co hieu luc trong 15 phut.'
     ].join('\n'), {
@@ -61,6 +64,25 @@ async function handleRutTienCommand(bot, msg, match) {
       parse_mode: 'HTML'
     });
   }
+}
+
+function parseWithdrawArgs(rawValue) {
+  const raw = String(rawValue || '').trim().toLowerCase();
+  if (!raw) return { amount: null, quantity: 1, valid: true };
+
+  const normalized = raw.replace(/\s*x\s*/g, ' ');
+  const parts = normalized.split(/\s+/).filter(Boolean);
+  const amount = Number(String(parts[0] || '').replace(/[,. ]/g, ''));
+  const quantity = parts[1] ? Number(parts[1]) : 1;
+
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return { amount: null, quantity: 1, valid: false };
+  }
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+    return { amount: null, quantity: 1, valid: false };
+  }
+
+  return { amount, quantity, valid: true };
 }
 
 async function handleDanhSachRutCommand(bot, msg, match) {
